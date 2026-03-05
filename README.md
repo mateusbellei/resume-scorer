@@ -1,4 +1,4 @@
-# Resume Scorer — Nuxt / Vue / TypeScript / Tailwind
+# Resume Scorer
 
 Automation to read resumes (PDF or DOCX), extract LinkedIn and GitHub links, optionally fetch GitHub profile via API, and score candidates against a configurable interview stack. Default stack: **Nuxt, Vue.js, TypeScript, TailwindCSS, Nuxt modules/layers**.
 
