@@ -1,5 +1,5 @@
 /**
- * Tipos para o avaliador de currículos - vaga Nuxt/Vue/TypeScript/Tailwind
+ * Types for the resume scorer and configurable interview stacks.
  */
 
 export interface ParsedResume {
@@ -12,25 +12,35 @@ export interface ParsedResume {
   githubUsername: string | null;
 }
 
+/** One scoring category (e.g. "Nuxt", "Vue") with patterns and max score. */
+export interface StackCategoryConfig {
+  id: string;
+  label: string;
+  maxScore: number;
+  patterns: { pattern: RegExp; weight: number }[];
+  highlightLabel: string;
+}
+
+/** A full stack profile for one type of interview (e.g. Nuxt/Vue or React/Next). */
+export interface StackProfile {
+  id: string;
+  label: string;
+  categories: StackCategoryConfig[];
+}
+
+/** Score result: breakdown by category id, total, and GitHub bonus. */
 export interface StackScoreBreakdown {
-  nuxt: number;
-  vue: number;
-  typescript: number;
-  tailwind: number;
-  nuxtModulesLayers: number;
-  ecosystem: number;
-  /** Pontos extras por dados do GitHub (repos, linguagens) */
-  githubBonus: number;
-  /** Total 0-100 */
+  breakdown: Record<string, number>;
   total: number;
+  githubBonus: number;
 }
 
 export interface ScoredCandidate {
   resume: ParsedResume;
   score: StackScoreBreakdown;
-  /** Justificativas para o score (trechos ou critérios) */
+  /** Stack profile used for this score (for report breakdown labels) */
+  stackProfile: StackProfile;
   highlights: string[];
-  /** Explanation of GitHub bonus (e.g. why +8) */
   githubBonusExplanation?: string;
 }
 

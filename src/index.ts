@@ -1,6 +1,6 @@
 /**
  * Resume scorer: reads PDF/DOCX, extracts LinkedIn/GitHub links,
- * fetches GitHub API and scores candidates for Nuxt/Vue/TypeScript/Tailwind stack.
+ * fetches GitHub API and scores candidates against a selected stack profile.
  */
 
 import { readdir, writeFile } from "node:fs/promises";
@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { config } from "dotenv";
 
+import { STACK_SECTIONS } from "./config/stacks.js";
 import { extractTextFromPdf, isPdf } from "./readers/pdf.js";
 import { extractTextFromDocx, isDocx } from "./readers/docx.js";
 import { extractLinkedInUrl, extractGitHubUrl } from "./extractors/urls.js";
@@ -18,18 +19,14 @@ import {
 } from "./extractors/name.js";
 import { scoreResume, applyGitHubBonus } from "./scoring/stack.js";
 import { fetchGitHubProfile, githubBonusFromProfile } from "./github.js";
-import type { ParsedResume, ScoredCandidate } from "./types.js";
+import type { ParsedResume, ScoredCandidate, StackProfile } from "./types.js";
 
-// Load .env from project root (resume-scorer folder)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 config({ path: path.resolve(__dirname, "..", ".env") });
 
 const RESUMES_DIR = process.env.RESUMES_DIR
   ? path.resolve(process.cwd(), process.env.RESUMES_DIR)
   : path.resolve(__dirname, "..", "..");
-
-const DEFAULT_STACK_LABEL =
-  "Nuxt, Vue.js, TypeScript, TailwindCSS, Nuxt modules/layers";
 
 function ask(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -41,19 +38,51 @@ function ask(question: string): Promise<string> {
   });
 }
 
-async function showMenu(): Promise<boolean> {
+async function showMenu(): Promise<StackProfile | null> {
   console.log("\n--- Interview stack ---\n");
-  console.log("  1) Default stack: " + DEFAULT_STACK_LABEL);
-  console.log("  2) Exit\n");
-  const choice = await ask("Select option (1 or 2): ");
-  if (choice === "2" || choice.toLowerCase() === "exit") {
+  // Level 1: choose section (Default, Front-end, Back-end, Exit)
+  STACK_SECTIONS.forEach((s, i) => {
+    console.log(`  ${i + 1}) ${s.label}`);
+  });
+  console.log(`  ${STACK_SECTIONS.length + 1}) Exit\n`);
+  const sectionChoice = await ask(
+    `Select section (1-${STACK_SECTIONS.length + 1}): `
+  );
+  const sectionNum = parseInt(sectionChoice, 10);
+  if (
+    sectionNum === STACK_SECTIONS.length + 1 ||
+    sectionChoice.toLowerCase() === "exit"
+  ) {
     console.log("Bye.");
-    return false;
+    return null;
   }
-  if (choice !== "1") {
-    console.log("Using default stack (1).\n");
+  if (sectionNum < 1 || sectionNum > STACK_SECTIONS.length) {
+    console.log("Using Default (1).\n");
+    return STACK_SECTIONS[0].stacks[0];
   }
-  return true;
+  const section = STACK_SECTIONS[sectionNum - 1];
+  // Default has a single stack; use it directly
+  if (section.stacks.length === 1) {
+    return section.stacks[0];
+  }
+  // Level 2: choose stack within section (Front-end or Back-end)
+  console.log(`\n--- ${section.label} ---\n`);
+  section.stacks.forEach((p, i) => {
+    console.log(`  ${i + 1}) ${p.label}`);
+  });
+  console.log(`  ${section.stacks.length + 1}) Back\n`);
+  const stackChoice = await ask(
+    `Select stack (1-${section.stacks.length + 1}): `
+  );
+  const stackNum = parseInt(stackChoice, 10);
+  if (stackNum === section.stacks.length + 1) {
+    return showMenu(); // Back to section selection
+  }
+  if (stackNum < 1 || stackNum > section.stacks.length) {
+    console.log("Using first option.\n");
+    return section.stacks[0];
+  }
+  return section.stacks[stackNum - 1];
 }
 
 async function extractText(filePath: string): Promise<string> {
@@ -85,15 +114,18 @@ async function parseResume(filePath: string): Promise<ParsedResume | null> {
   };
 }
 
-async function scoreCandidate(parsed: ParsedResume): Promise<ScoredCandidate> {
-  const { score, highlights } = scoreResume(parsed);
+async function scoreCandidate(
+  parsed: ParsedResume,
+  profile: StackProfile
+): Promise<ScoredCandidate> {
+  const { score, highlights } = scoreResume(parsed, profile);
 
   let finalScore = { ...score };
   let githubBonusExplanation: string | undefined;
 
   if (parsed.githubUsername) {
-    const profile = await fetchGitHubProfile(parsed.githubUsername);
-    const { bonus, explanation } = githubBonusFromProfile(profile);
+    const githubProfile = await fetchGitHubProfile(parsed.githubUsername);
+    const { bonus, explanation } = githubBonusFromProfile(githubProfile);
     finalScore = applyGitHubBonus(finalScore, bonus);
     githubBonusExplanation = explanation;
     if (bonus > 0) highlights.push(`GitHub: +${bonus} (profile verified)`);
@@ -102,28 +134,39 @@ async function scoreCandidate(parsed: ParsedResume): Promise<ScoredCandidate> {
   return {
     resume: parsed,
     score: finalScore,
+    stackProfile: profile,
     highlights,
     githubBonusExplanation,
   };
 }
 
 function formatReport(results: ScoredCandidate[]): string {
+  if (results.length === 0) {
+    return "No candidates to report.";
+  }
   const sorted = [...results].sort((a, b) => b.score.total - a.score.total);
+  const profile = sorted[0].stackProfile;
+  const stackLabel = profile.label;
+
   const lines: string[] = [
     "=".repeat(80),
-    "RESUME SCORE REPORT | Stack: " + DEFAULT_STACK_LABEL,
+    "RESUME SCORE REPORT | Stack: " + stackLabel,
     "=".repeat(80),
     "",
   ];
 
   for (let i = 0; i < sorted.length; i++) {
-    const { resume, score, highlights, githubBonusExplanation } = sorted[i];
+    const { resume, score, stackProfile, highlights, githubBonusExplanation } =
+      sorted[i];
     const name = resume.candidateName ?? resume.fileName;
+    const parts = stackProfile.categories.map(
+      (c) => `${c.label} ${score.breakdown[c.id] ?? 0}`
+    );
     lines.push(`${i + 1}. ${name}`);
     lines.push(`   File: ${resume.fileName}`);
     lines.push(`   TOTAL SCORE: ${score.total}/100`);
     lines.push(
-      `   Breakdown: Nuxt ${score.nuxt} | Vue ${score.vue} | TS ${score.typescript} | Tailwind ${score.tailwind} | Modules/Layers ${score.nuxtModulesLayers} | Ecosystem ${score.ecosystem} | GitHub bonus ${score.githubBonus}`
+      `   Breakdown: ${parts.join(" | ")} | GitHub bonus ${score.githubBonus}`
     );
     if (resume.linkedInUrl) lines.push(`   LinkedIn: ${resume.linkedInUrl}`);
     if (resume.githubUrl) lines.push(`   GitHub:   ${resume.githubUrl}`);
@@ -139,8 +182,8 @@ function formatReport(results: ScoredCandidate[]): string {
 }
 
 async function run() {
-  const ok = await showMenu();
-  if (!ok) return;
+  const profile = await showMenu();
+  if (!profile) return;
 
   console.log("Reading resumes from:", RESUMES_DIR);
   const entries = await readdir(RESUMES_DIR, { withFileTypes: true });
@@ -163,7 +206,7 @@ async function run() {
   const results: ScoredCandidate[] = [];
   for (const p of parsed) {
     try {
-      const scored = await scoreCandidate(p);
+      const scored = await scoreCandidate(p, profile);
       results.push(scored);
     } catch (err) {
       console.error("Error scoring", p.fileName, err);

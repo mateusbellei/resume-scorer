@@ -4,10 +4,12 @@ Automation to read resumes (PDF or DOCX), extract LinkedIn and GitHub links, opt
 
 ## Features
 
-- **Menu on startup**: Choose the interview stack (default stack or exit) before running.
-- **Default stack**: Nuxt, Vue.js, TypeScript, TailwindCSS, Nuxt ecosystem (modules, layers).
-- **Environment**: Resume directory and optional GitHub token via `.env` (see below).
-- **Report in English**: Output and report file are in English; below highlights, the GitHub bonus is explained (e.g. why score +8).
+- **Two-level menu**: First choose a section (Default, Front-end, Back-end, or Exit). Then, for Front-end or Back-end, choose the specific stack. The report is focused on the selected stack.
+- **Default**: Single stack — Nuxt, Vue.js, TypeScript, TailwindCSS, Nuxt modules/layers (as originally specified).
+- **Front-end**: JavaScript/TypeScript + ecosystem, Vue/Nuxt + Vue ecosystem, React/Next + ecosystem, Angular + ecosystem.
+- **Back-end**: PHP/Laravel, Node.js, Python, Java (each with concepts and ecosystem patterns).
+- **Environment**: Resume directory and optional GitHub token via `.env`.
+- **Report in English**: Output and report file in English; below highlights, the GitHub bonus is explained (e.g. why +8).
 
 ## Setup
 
@@ -45,9 +47,10 @@ Or build and run:
 npm run score
 ```
 
-1. When prompted, select the interview stack (e.g. **1** for default stack, **2** to exit).
-2. The tool reads all PDF/DOCX files in `RESUMES_DIR`, extracts text and links, fetches GitHub when a link is present, and computes scores.
-3. Report is printed in the console and saved as `score-report.txt` in the resume directory.
+1. **Section**: Choose 1 = Default, 2 = Front-end, 3 = Back-end, or 4 = Exit. Default runs immediately with the default stack.
+2. **Stack** (if Front-end or Back-end): Choose which stack (e.g. Vue/Nuxt, React/Next, PHP/Laravel, Node, Python, Java). Option "Back" returns to section selection.
+3. The tool reads all PDF/DOCX files in `RESUMES_DIR`, extracts text and links, fetches GitHub when a link is present, and scores against the **selected stack**. The report is focused on that stack’s categories.
+4. Report is printed in the console and saved as `score-report.txt` in the resume directory.
 
 ### Using another resume directory
 
@@ -93,11 +96,37 @@ Each candidate entry includes:
 
 **Total** is capped at 100 (CV score + GitHub bonus).
 
+## Stack configuration (Default / Front / Back)
+
+Stacks are organized in **sections** in **`src/config/stacks.ts`**:
+
+- **`STACK_SECTIONS`** — Array of `{ id, label, stacks: StackProfile[] }`:
+  - **Default** — One stack: Nuxt, Vue.js, TypeScript, Tailwind, Nuxt modules/layers.
+  - **Front-end** — JS/TS + ecosystem, Vue/Nuxt, React/Next, Angular (each with its own categories and patterns).
+  - **Back-end** — PHP/Laravel, Node, Python, Java (each with concepts and ecosystem).
+
+Each **stack profile** has:
+
+- **`id`** — Unique key (e.g. `"front-vue-nuxt"`, `"back-node"`).
+- **`label`** — Text shown in the menu and report header.
+- **`categories`** — Scoring categories. Each category has:
+  - **`id`**, **`label`** — For the breakdown line in the report.
+  - **`maxScore`** — Max points for that category.
+  - **`highlightLabel`** — Shown in “Highlights” when the candidate matches.
+  - **`patterns`** — `[{ pattern: RegExp, weight: number }]`; resume text (lowercased) is matched; each match adds `weight` up to `maxScore`.
+
+**Adding a new stack** (e.g. to Front-end): add a new object to the corresponding array (`FRONT_STACKS` or `BACK_STACKS`) with `id`, `label`, and `categories`. It will appear in the submenu for that section.
+
+**Adding a new section** (e.g. “Mobile”): add a new `StackSection` to `STACK_SECTIONS` with `id`, `label`, and `stacks: StackProfile[]`. Update the menu in `src/index.ts` if you need different behaviour (e.g. section-specific flow).
+
+The report breakdown and total score are computed from the **selected stack’s** categories. GitHub bonus (up to +10) is applied on top for all stacks.
+
 ## Project structure
 
+- `src/config/stacks.ts` — **Sections** (Default, Front-end, Back-end) and **stack profiles** (add or edit stacks here)
 - `src/readers/` — PDF (pdf-parse) and DOCX (mammoth) readers
 - `src/extractors/` — URL (LinkedIn, GitHub) and candidate name extraction
-- `src/scoring/` — Stack scoring rules
+- `src/scoring/` — Generic scoring from a stack profile
 - `src/github.ts` — GitHub API fetch and bonus + explanation
 - `src/index.ts` — Menu, orchestration, and report generation
 
